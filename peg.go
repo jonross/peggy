@@ -16,17 +16,30 @@ type Parser struct {
     allowEmpty bool
     // if true all subsidiary parsers don't skip whitespace
     adjacent bool
-    // actual parse function, returns whether matched + amount of input consumed
-    parse func(state *state, input []rune) (bool, int)
+    // actual parse function, returns whether matched + amount of input consumed + user result
+    parse func(state *state, input []rune) (bool, int, interface{})
     // if a compound parser, these are subsidiary parsers
     subParsers []*Parser
     // what to call with the string matched by this parser
-    handler func(result string)
+    handler func(info *Info) interface{}
+    // what to pass to the handler
+    context Info
+}
+
+// This is passed to user callbacks.  Parser field is private because we don't want the user
+// modifying the parser during a parse.
+//
+type Info struct {
+    parser *Parser
+    // what input was matched
+    matched []rune
+    // user result returned from parser
+    result interface{}
 }
 
 type state struct {
     // if == 0 we skip leading whitespace before invoking parser function
-    skipWhite int
+    noSkip int
     // recursion depth
     depth int
 }
@@ -34,14 +47,14 @@ type state struct {
 // Return a Parser that matches any character in a string.
 //
 func AnyOf(str string) *Parser {
-    return newParser("Anyof(" + str + ")", false, nil, func(state *state, input []rune) (bool, int) {
+    return newParser("Anyof(" + str + ")", false, nil, func(state *state, input []rune) (bool, int, interface{}) {
         // TODO: optimize
         for _, char := range str {
             if input[0] == char {
-                return true, 1
+                return true, 1, nil
             }
         }
-        return false, 0
+        return false, 0, nil
     })
 }
 
@@ -50,17 +63,17 @@ func AnyOf(str string) *Parser {
 func Literal(str string) *Parser {
     runes := []rune(str)
     strLen := len(runes)
-    return newParser("Literal(" + str + ")", len(str) == 0, nil, func(state *state, input []rune) (bool, int) {
+    return newParser("Literal(" + str + ")", len(str) == 0, nil, func(state *state, input []rune) (bool, int, interface{}) {
         inputLen := len(input)
         if strLen > inputLen {
-            return false, 0
+            return false, 0, nil
         }
         for i, char := range runes {
             if char != input[i] {
-                return false, 0
+                return false, 0, nil
             }
         }
-        return true, strLen
+        return true, strLen, nil
     })
 }
 
@@ -68,64 +81,14 @@ func Literal(str string) *Parser {
 // and stops after the first that matches.
 //
 func OneOf(parsers ...*Parser) *Parser {
-    return newParser("OneOf", false, parsers, func(state *state, input[]rune) (bool, int) {
+    return newParser("OneOf", false, parsers, func(state *state, input[]rune) (bool, int, interface{}) {
         for _, parser := range parsers {
-            match, used := parser.invoke(state, input)
+            match, used, result := parser.invoke(state, input)
             if match {
-                return match, used
+                return match, used, result
             }
         }
-        return false, 0
-    })
-}
-
-// Like ZeroOrMoreOf but must match at least one, once.
-//
-func OneOrMoreOf(parsers ...*Parser) *Parser {
-    return newParser("OneOrMoreOf", false, parsers, func(state *state, input[]rune) (bool, int) {
-        return oneOrMoreOf(state, parsers, input)
-    })
-}
-
-func oneOrMoreOf(state *state, parsers []*Parser, input[] rune) (bool, int) {
-    for _, parser := range parsers {
-        match, used :=  parser.invoke(state, input)
-        if match {
-            _, used2 := oneOrMoreOf(state, parsers, input[used:])
-            return true, used + used2
-        }
-    }
-    return false, 0
-}
-
-// Return a parser that optionally matches what another parser matches.
-//
-
-func Optional(parser *Parser) *Parser {
-    return newParser("OneOrMoreOf", true, []*Parser{parser}, func(state *state, input[]rune) (bool, int) {
-        match, used := parser.invoke(state, input)
-        if match {
-            return match, used
-        }
-        return true, 0
-    })
-}
-
-// Return a parser that matches if each of the supplied parsers
-// matches when tried in succession.
-//
-func Sequence(parsers ...*Parser) *Parser {
-    return newParser("Sequence", false, parsers, func(state *state, input []rune) (bool, int) {
-        total := 0
-        for _, parser := range parsers {
-            match, used := parser.invoke(state, input)
-            if ! match {
-                return false, 0
-            }
-            input = input[used:]
-            total += used
-        }
-        return true, total
+        return false, 0, nil
     })
 }
 
@@ -133,34 +96,85 @@ func Sequence(parsers ...*Parser) *Parser {
 // in the supplied list of parsers matches.
 //
 func ZeroOrMoreOf(parsers ...*Parser) *Parser {
-    return newParser("ZeroOrMoreOf", true, parsers, func(state *state, input[]rune) (bool, int) {
-        return zeroOrMoreOf(state, parsers, input)
+    return newParser("ZeroOrMoreOf", true, parsers, func(state *state, input[]rune) (bool, int, interface{}) {
+        return someOf(false, state, parsers, input)
     })
 }
 
-func zeroOrMoreOf(state *state, parsers []*Parser, input[] rune) (bool, int) {
-    for _, parser := range parsers {
-        match, used :=  parser.invoke(state, input)
-        if match {
-            _, used2 := zeroOrMoreOf(state, parsers, input[used:])
-            return true, used + used2
-        }
-    }
-    return true, 0
+// Like ZeroOrMoreOf but must match at least one, once.
+//
+func OneOrMoreOf(parsers ...*Parser) *Parser {
+    return newParser("OneOrMoreOf", false, parsers, func(state *state, input[]rune) (bool, int, interface{}) {
+        return someOf(true, state, parsers, input)
+    })
 }
 
-// Returns a modified parser whose handler will be passed
+func someOf(mustMatch bool, state *state, parsers []*Parser, input []rune) (bool, int, interface{}) {
+    totalUsed := 0
+    hasMatched := false
+    results := make([]interface{}, 0)
+    for {
+        for _, parser := range parsers {
+            match, used, result :=  parser.invoke(state, input)
+            if match {
+                totalUsed += used
+                input = input[used:]
+                results = append(results, result)
+                hasMatched = true
+                break
+            } else if mustMatch && !hasMatched {
+                return false, 0, nil
+            } else {
+                return true, totalUsed, results
+            }
+        }
+    }
+}
+
+// Return a parser that optionally matches what another parser matches.
+//
+
+func Optional(parser *Parser) *Parser {
+    return newParser("OneOf", true, []*Parser{parser}, func(state *state, input[]rune) (bool, int, interface{}) {
+        match, used, result := parser.invoke(state, input)
+        if match {
+            return match, used, result
+        }
+        return true, 0, nil
+    })
+}
+
+// Return a parser that matches if each of the supplied parsers
+// matches when tried in succession.
+//
+func Sequence(parsers ...*Parser) *Parser {
+    return newParser("Sequence", false, parsers, func(state *state, input []rune) (bool, int, interface{}) {
+        totalUsed := 0
+        results := make([]interface{}, 0)
+        for _, parser := range parsers {
+            match, used, result := parser.invoke(state, input)
+            if ! match {
+                return false, 0, nil
+            }
+            totalUsed += used
+            input = input[used:]
+            results = append(results, result)
+        }
+        return true, totalUsed, results
+    })
+}
+
 // Creates a Parser node around a parsing function.
 //
 func newParser(info string, allowEmpty bool, subParsers []*Parser, 
-               parse func(state *state, input []rune) (bool, int)) *Parser {
-    return &Parser{info, allowEmpty, false, parse, subParsers, nil}
+               parse func(state *state, input []rune) (bool, int, interface{})) *Parser {
+    return &Parser{info, allowEmpty, false, parse, subParsers, nil, Info{}}
 }
 
 // Run one pass of a parser.  Skips whitespace if directed, and invokes
 // the handler with the string matched.
 //
-func (parser *Parser) invoke(state *state, input []rune) (bool, int) {
+func (parser *Parser) invoke(state *state, input []rune) (bool, int, interface{}) {
     fmt.Printf("%s-> %s on '%s'\n", strings.Repeat(" ", state.depth * 2), 
                 parser.info, string(input))
     // TODO: optimize to skip space once per each change of depth; right now
@@ -170,25 +184,30 @@ func (parser *Parser) invoke(state *state, input []rune) (bool, int) {
         input = input[space:]
     }
     if len(input) == 0 && !parser.allowEmpty {
-        return false, 0
+        return false, 0, nil
     }
     state.depth += 1
     if parser.adjacent {
-        state.skipWhite += 1
+        state.noSkip += 1
     }
-    match, used := parser.parse(state, input)
+    match, used, result := parser.parse(state, input)
+    if match && parser.handler != nil {
+        parser.context.matched = input[:used]
+        parser.context.result = result
+        result = parser.handler(&parser.context)
+    }
     state.depth -= 1
     if parser.adjacent {
-        state.skipWhite -= 1
+        state.noSkip -= 1
     }
     fmt.Printf("%s%v, %d <- %s on '%s'\n", strings.Repeat(" ", state.depth * 2),
                 match, used, parser.info, string(input))
-    return match, used
+    return match, used, result
 }
 
 func (parser *Parser) skipWhite(state *state, input[] rune) int {
     space := 0
-    if state.skipWhite == 0 {
+    if state.noSkip == 0 {
         for _, char := range input {
             if !unicode.IsSpace(char) {
                 break
@@ -211,7 +230,7 @@ func (parser *Parser) Adjacent() *Parser {
 // Return the passed parser, but with its matching handler bound
 // to a callback function.
 //
-func (parser *Parser) Handle(handler func(s string)) *Parser {
+func (parser *Parser) Handle(handler func(info *Info) interface{}) *Parser {
     parser.handler = handler
     return parser
 }
@@ -225,6 +244,14 @@ func (parser *Parser) Info(info string) *Parser {
 
 // Parse a string and return results.
 //
-func (parser *Parser) Parse(input string) {
-    parser.invoke(&state{0, 0}, []rune(input))
+func (parser *Parser) Parse(input string) (bool, int, interface{}) {
+    return parser.invoke(&state{0, 0}, []rune(input))
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Return the text that was matched by the current Parser.
+//
+func (info *Info) Text() string {
+    return string(info.matched)
 }
