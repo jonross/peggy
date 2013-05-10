@@ -5,6 +5,7 @@ package peg
 
 import (
     "fmt"
+    "reflect"
     "strings"
     "unicode"
 )
@@ -255,3 +256,17 @@ func (parser *Parser) Parse(input string) (bool, int, interface{}) {
 func (info *Info) Text() string {
     return string(info.matched)
 }
+
+// Return user data associated with the current Parser.  If index==0,
+// return the object as-is, if >0 assumes this is a compound parser
+// and return the user data object associated with the (i-1)th parser.
+//
+func (info *Info) Get(index int) reflect.Value {
+    val := reflect.ValueOf(info.result)
+    if index == 0 {
+        return val
+    }
+    // TODO proper error handling
+    return val.Index(index - 1)
+}
+

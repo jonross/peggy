@@ -1,18 +1,44 @@
 package peg
 
 import (
-    "reflect"
+    . "launchpad.net/gocheck"
     "testing"
 )
 
-func TestBasics(t *testing.T) {
+// Hook up gocheck into the "go test" runner. 
+func Test(t *testing.T) { TestingT(t) }
+type MySuite struct{} 
+var _ = Suite(&MySuite{})
+
+type TypeVar struct {
+    arrow *string
+    typeSpec *string
+    varName *string
+}
+
+func (s *MySuite) TestBasics(c *C) {
 
     letter := AnyOf("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_")
     number := AnyOf("0123456789")
+
     identifier := Sequence(letter, ZeroOrMoreOf(OneOf(letter, number))).Adjacent().
-        Handle(func(info *Info) interface{} { eq(t, "foo", info.Text()); return "got foo" })
+        Handle(func(info *Info) interface{} { 
+            return info.Text()
+        })
+
     _, _, result := identifier.Parse("foo")
-    eq(t, "got foo", result)
+    c.Check("foo", Equals, result)
+
+    typeVar := Sequence(identifier, identifier).
+        Handle(func(info *Info) interface{} {
+            typeSpec := info.Get(1).String()
+            var varName string
+            if info.Get(2).IsNil() {
+                return &TypeVar{nil, &typeSpec, nil}
+            }
+            varName = info.Get(2).String()
+            return &TypeVar{nil, &typeSpec, &varName}
+        })
 
     r1 := Literal("->")
     r2 := Literal("->>")
@@ -20,24 +46,14 @@ func TestBasics(t *testing.T) {
     l2 := Literal("<<-")
 
     arrow := OneOf(r1, r2, l1, l2)
-    search := Sequence(identifier, ZeroOrMoreOf(Sequence(arrow, identifier)))
-    _ = search
-}
+    step := Sequence(arrow, typeVar).
+        Handle(func(info *Info) interface{} {
+            arr := info.Get(1).String()
+            tv := info.Get(2).Interface().(*TypeVar)
+            tv.arrow = &arr
+            return tv
+        })
 
-func eq(t *testing.T, expected interface{}, actual interface{}) {
-    vx := reflect.ValueOf(expected)
-    va := reflect.ValueOf(actual)
-    if vx.Kind() != va.Kind() {
-        t.Error("Expected %v but was %v\n", expected, actual)
-    }
-    switch vx.Kind() {
-        case reflect.String:
-            xs, _ := expected.(string)
-            xa, _ := actual.(string)
-            if (xs != xa) {
-                t.Errorf("Expected '%s' but was '%s'\n", xs, xa)
-            }
-        default:
-            t.Error("Unhandled kind: %v\n", vx.Kind())
-    }
+    search := Sequence(typeVar, ZeroOrMoreOf(step))
+    search.Parse("a b -> c d ->> e f")
 }
