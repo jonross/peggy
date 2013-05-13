@@ -1,4 +1,4 @@
-package peg
+package peggy
 
 import (
     . "launchpad.net/gocheck"

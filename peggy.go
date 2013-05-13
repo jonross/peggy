@@ -1,7 +1,7 @@
 /*
 Package peg is a PEG-based parser.
 */
-package peg
+package peggy
 
 import (
     "log"
