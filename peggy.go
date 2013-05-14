@@ -318,32 +318,16 @@ func (parser *Parser) Describe(text string) *Parser {
     return parser
 }
 
-// Shortcut for defining a handler that returns the user data object for the indexed parser as 
-// a String; this is the same as writing
+// Shortcut for defining a handler that returns the user data object for the indexed parser;
+// this is the same as writing
 //
 //     .Handle(func(s *State) {
-//         return s.Get(index).String()
+//         return s.Get(index).Interface()
 //     }
 //
-func (parser *Parser) StringResult(index int) *Parser {
+func (parser *Parser) Pick(index int) *Parser {
     return parser.Handle(func(s *State) interface{} {
-        return s.Get(index).String()
-    })
-}
-
-// Same as StringResult(index), but return an integer.
-//
-func (parser *Parser) IntResult(index int) *Parser {
-    return parser.Handle(func(s *State) interface{} {
-        return s.Get(index).Int()
-    })
-}
-
-// Same as StringResult(index), but return a float.
-//
-func (parser *Parser) FloatResult(index int) *Parser {
-    return parser.Handle(func(s *State) interface{} {
-        return s.Get(index).Float()
+        return s.Get(index).Interface()
     })
 }
 

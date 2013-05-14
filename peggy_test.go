@@ -117,7 +117,7 @@ func (s *MySuite) TestCalculator(c *C) {
     }
 
     expr1 := Deferred()
-    expr3 := OneOf(number, Sequence(lpar, expr1, rpar).FloatResult(2)).Describe("expr3")
+    expr3 := OneOf(number, Sequence(lpar, expr1, rpar).Pick(2)).Describe("expr3")
 
     mulOps := ZeroOrMoreOf(Sequence(mul, expr3).Describe("mulop").Handle(makeOp)).Describe("mulops")
     expr2 := Sequence(expr3, mulOps).Flatten(1).Describe("expr2").Handle(evalOps)
