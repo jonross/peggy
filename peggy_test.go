@@ -84,14 +84,13 @@ func (s *MySuite) TestCalculator(c *C) {
             return val
         })
 
-    // Define parsers for the following BNF:
+    // Define parsers for the following EBNF:
     //
-    // expr1 := expr2 ( ('+' | '-') expr2 ) *
-    // expr2 := expr3 ( ('*' | '/') expr3 ) *
-    // expr3 := number | '(' expr1 ')'
-    //
-    // We define them in reverse order and use a Deferred() parser for
-    // expr1 to handle the recursive definition.
+    // expr1 := expr2 [ ( "+" | "-" ) expr2 ]
+    // expr2 := expr3 [ ( "*" | "/" ) expr3 ]
+    // expr3 := number | "(" expr1 ")"
+    // number := { digit } | [ digit ] "." { digit }
+    // digit := "0" ... "9"
 
     makeOp := func(s *State) interface{} {
         op := s.Get(1).String()
