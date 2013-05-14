@@ -20,13 +20,11 @@ type Parser struct {
     // if true all subsidiary parsers don't skip whitespace
     adjacent bool
     // actual parse function, returns whether matched + amount of input consumed + user result
-    parse func(state *state, input []rune) (bool, int, interface{})
+    parse func(state *State, input []rune) (bool, int, interface{})
     // if a compound parser, these are subsidiary parsers
     subParsers []*Parser
     // what to call with the string matched by this parser
-    handler func(info *Info) interface{}
-    // what to pass to the handler
-    context Info
+    handler func(s *State) interface{}
     // do we try to flatten user result arrays
     flatten bool
     // and how far
@@ -35,30 +33,10 @@ type Parser struct {
     debug int
 }
 
-// This is passed to user callbacks.  Parser field is private because we don't want the user
-// modifying the parser during a parse.
-//
-type Info struct {
-    parser *Parser
-    // what input was matched
-    matched []rune
-    // user result returned from parser
-    result interface{}
-}
-
-type state struct {
-    // if == 0 we skip leading whitespace before invoking parser function
-    noSkip int
-    // recursion depth
-    depth int
-    // debug depth
-    debug int
-}
-
 // Return a Parser that matches any character in a string.
 //
 func AnyOf(str string) *Parser {
-    return newParser("Anyof(" + str + ")", false, nil, func(state *state, input []rune) (bool, int, interface{}) {
+    return newParser("Anyof(" + str + ")", false, nil, func(state *State, input []rune) (bool, int, interface{}) {
         // TODO: optimize
         for _, char := range str {
             if input[0] == char {
@@ -82,7 +60,7 @@ func Deferred() *Parser {
 func Literal(str string) *Parser {
     runes := []rune(str)
     strLen := len(runes)
-    return newParser("Literal(" + str + ")", len(str) == 0, nil, func(state *state, input []rune) (bool, int, interface{}) {
+    return newParser("Literal(" + str + ")", len(str) == 0, nil, func(state *State, input []rune) (bool, int, interface{}) {
         inputLen := len(input)
         if strLen > inputLen {
             return false, 0, nil
@@ -93,14 +71,14 @@ func Literal(str string) *Parser {
             }
         }
         return true, strLen, nil
-    }).Handle(func(info *Info) interface{} { return info.Text() })
+    }).Handle(func(s *State) interface{} { return s.Text() })
 }
 
 // Return a Parser that tries a list of parsers in succession
 // and stops after the first that matches.
 //
 func OneOf(parsers ...*Parser) *Parser {
-    return newParser("OneOf", false, parsers, func(state *state, input[]rune) (bool, int, interface{}) {
+    return newParser("OneOf", false, parsers, func(state *State, input[]rune) (bool, int, interface{}) {
         for _, parser := range parsers {
             match, used, result := parser.invoke(state, input)
             if match {
@@ -115,7 +93,7 @@ func OneOf(parsers ...*Parser) *Parser {
 // in the supplied list of parsers matches.
 //
 func ZeroOrMoreOf(parsers ...*Parser) *Parser {
-    return newParser("ZeroOrMoreOf", true, parsers, func(state *state, input[]rune) (bool, int, interface{}) {
+    return newParser("ZeroOrMoreOf", true, parsers, func(state *State, input[]rune) (bool, int, interface{}) {
         return someOf(false, state, parsers, input)
     })
 }
@@ -123,12 +101,12 @@ func ZeroOrMoreOf(parsers ...*Parser) *Parser {
 // Like ZeroOrMoreOf but must match at least one, once.
 //
 func OneOrMoreOf(parsers ...*Parser) *Parser {
-    return newParser("OneOrMoreOf", false, parsers, func(state *state, input[]rune) (bool, int, interface{}) {
+    return newParser("OneOrMoreOf", false, parsers, func(state *State, input[]rune) (bool, int, interface{}) {
         return someOf(true, state, parsers, input)
     })
 }
 
-func someOf(mustMatch bool, state *state, parsers []*Parser, input []rune) (bool, int, interface{}) {
+func someOf(mustMatch bool, state *State, parsers []*Parser, input []rune) (bool, int, interface{}) {
     totalUsed := 0
     hasMatched := false
     results := make([]interface{}, 0)
@@ -154,7 +132,7 @@ func someOf(mustMatch bool, state *state, parsers []*Parser, input []rune) (bool
 //
 
 func Optional(parser *Parser) *Parser {
-    return newParser("OneOf", true, []*Parser{parser}, func(state *state, input[]rune) (bool, int, interface{}) {
+    return newParser("OneOf", true, []*Parser{parser}, func(state *State, input[]rune) (bool, int, interface{}) {
         match, used, result := parser.invoke(state, input)
         if match {
             return match, used, result
@@ -167,7 +145,7 @@ func Optional(parser *Parser) *Parser {
 // matches when tried in succession.
 //
 func Sequence(parsers ...*Parser) *Parser {
-    return newParser("Sequence", false, parsers, func(state *state, input []rune) (bool, int, interface{}) {
+    return newParser("Sequence", false, parsers, func(state *State, input []rune) (bool, int, interface{}) {
         totalUsed := 0
         results := make([]interface{}, 0)
         for _, parser := range parsers {
@@ -186,14 +164,14 @@ func Sequence(parsers ...*Parser) *Parser {
 // Creates a Parser node around a parsing function.
 //
 func newParser(info string, allowEmpty bool, subParsers []*Parser, 
-               parse func(state *state, input []rune) (bool, int, interface{})) *Parser {
-    return &Parser{info, nil, allowEmpty, false, parse, subParsers, nil, Info{}, false, 0, 0}
+               parse func(state *State, input []rune) (bool, int, interface{})) *Parser {
+    return &Parser{info, nil, allowEmpty, false, parse, subParsers, nil, false, 0, 0}
 }
 
 // Run one pass of a parser.  Skips whitespace if directed, and invokes
 // the handler with the string matched.
 //
-func (parser *Parser) invoke(state *state, input []rune) (bool, int, interface{}) {
+func (parser *Parser) invoke(state *State, input []rune) (bool, int, interface{}) {
 
     indent := func() string { return strings.Repeat(" ", state.depth * 4) }
 
@@ -253,12 +231,12 @@ func (parser *Parser) invoke(state *state, input []rune) (bool, int, interface{}
             }
         }
         if match && parser.handler != nil {
-            parser.context.matched = input[:used]
-            parser.context.result = result
+            state.matched = input[:used]
+            state.result = result
             if state.debug > 0 {
                 log.Printf("%sHandler => %#v\n", indent(), result)
             }
-            result = parser.handler(&parser.context)
+            result = parser.handler(state)
             if state.debug > 0 {
                 log.Printf("%sHandler <= %#v\n", indent(), result)
             }
@@ -272,7 +250,7 @@ func (parser *Parser) invoke(state *state, input []rune) (bool, int, interface{}
     return match, used + space, result
 }
 
-func (parser *Parser) skipWhite(state *state, input[] rune) int {
+func (parser *Parser) skipWhite(state *State, input[] rune) int {
     space := 0
     if state.noSkip == 0 {
         for _, char := range input {
@@ -328,7 +306,7 @@ func (parser *Parser) Bind(delegate *Parser) *Parser {
 // Return the passed parser, but with its matching handler bound
 // to a callback function.
 //
-func (parser *Parser) Handle(handler func(info *Info) interface{}) *Parser {
+func (parser *Parser) Handle(handler func(s *State) interface{}) *Parser {
     parser.handler = handler
     return parser
 }
@@ -338,6 +316,35 @@ func (parser *Parser) Handle(handler func(info *Info) interface{}) *Parser {
 func (parser *Parser) Describe(text string) *Parser {
     parser.description = text
     return parser
+}
+
+// Shortcut for defining a handler that returns the user data object for the indexed parser as 
+// a String; this is the same as writing
+//
+//     .Handle(func(s *State) {
+//         return s.Get(index).String()
+//     }
+//
+func (parser *Parser) StringResult(index int) *Parser {
+    return parser.Handle(func(s *State) interface{} {
+        return s.Get(index).String()
+    })
+}
+
+// Same as StringResult(index), but return an integer.
+//
+func (parser *Parser) IntResult(index int) *Parser {
+    return parser.Handle(func(s *State) interface{} {
+        return s.Get(index).Int()
+    })
+}
+
+// Same as StringResult(index), but return a float.
+//
+func (parser *Parser) FloatResult(index int) *Parser {
+    return parser.Handle(func(s *State) interface{} {
+        return s.Get(index).Float()
+    })
 }
 
 // Indicate the a parser should flatten N levels of its user result before passing to its
@@ -361,34 +368,50 @@ func (parser *Parser) Flatten(depth int) *Parser {
 // Parse a string and return results.
 //
 func (parser *Parser) Parse(input string) (bool, int, interface{}) {
-    return parser.invoke(&state{0, 0, parser.debug}, []rune(input))
+    return parser.invoke(&State{0, 0, parser.debug, nil, nil}, []rune(input))
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
+// One of these is created for each call to Parser.Parse; carries state information + is passed
+// to user Handlers.
+//
+type State struct {
+    // if == 0 we skip leading whitespace before invoking parser function
+    noSkip int
+    // recursion depth
+    depth int
+    // debug depth
+    debug int
+    // what input was matched
+    matched []rune
+    // user result returned from parser
+    result interface{}
+}
+
 // Return the text that was matched by the current Parser.
 //
-func (info *Info) Text() string {
-    return string(info.matched)
+func (s *State) Text() string {
+    return string(s.matched)
 }
 
 // Returns the length of the user data array, if an array; else
 // returns 0.
 //
-func (info *Info) Len() int {
-    val := reflect.ValueOf(info.result)
+func (s *State) Len() int {
+    val := reflect.ValueOf(s.result)
     if val.Kind() == reflect.Slice {
         return val.Len()
     }
     return 0
 }
 
-// Return user data associated with the current Parser.  If index==0,
-// return the object as-is, if >0 assumes this is a compound parser
-// and return the user data object associated with the (i-1)th parser.
+// Return user data associated with the current Parser.  If index==0, return the object as-is;
+// if >0 assumes this is a compound parser like a Sequence and return the user data object 
+// associated with the (i-1)th parser.
 //
-func (info *Info) Get(index int) reflect.Value {
-    val := reflect.ValueOf(info.result)
+func (s *State) Get(index int) reflect.Value {
+    val := reflect.ValueOf(s.result)
     if index == 0 {
         return val
     }

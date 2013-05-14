@@ -27,17 +27,17 @@ func (s *MySuite) TestBasics(c *C) {
     number := AnyOf("0123456789")
 
     identifier := Sequence(letter, ZeroOrMoreOf(OneOf(letter, number))).Adjacent().
-        Handle(func(info *Info) interface{} { 
-            return info.Text()
+        Handle(func(s *State) interface{} { 
+            return s.Text()
         })
 
     _, _, result := identifier.Parse("foo")
     c.Check("foo", Equals, result)
 
     typeVar := Sequence(identifier, identifier).
-        Handle(func(info *Info) interface{} {
-            typeSpec := info.Get(1).String()
-            varName := info.Get(2).String()
+        Handle(func(s *State) interface{} {
+            typeSpec := s.Get(1).String()
+            varName := s.Get(2).String()
             return &TypeVar{nil, &typeSpec, &varName}
         })
 
@@ -48,9 +48,9 @@ func (s *MySuite) TestBasics(c *C) {
 
     arrow := OneOf(r1, r2, l1, l2)
     step := Sequence(arrow, typeVar).
-        Handle(func(info *Info) interface{} {
-            arr := info.Get(1).String()
-            tv := info.Get(2).Interface().(*TypeVar)
+        Handle(func(s *State) interface{} {
+            arr := s.Get(1).String()
+            tv := s.Get(2).Interface().(*TypeVar)
             tv.arrow = &arr
             return tv
         })
@@ -79,8 +79,8 @@ func (s *MySuite) TestCalculator(c *C) {
     // matches 3, 3.5, .5; return float value
     number := OneOf(digits, Sequence(Optional(digits), point, digits)).
         Adjacent().Describe("number").
-        Handle(func(info *Info) interface{} {
-            val, _ := strconv.ParseFloat(info.Text(), 64)
+        Handle(func(s *State) interface{} {
+            val, _ := strconv.ParseFloat(s.Text(), 64)
             return val
         })
 
@@ -93,9 +93,9 @@ func (s *MySuite) TestCalculator(c *C) {
     // We define them in reverse order and use a Deferred() parser for
     // expr1 to handle the recursive definition.
 
-    makeOp := func(info *Info) interface{} {
-        op := info.Get(1).String()
-        rhs := info.Get(2).Float()
+    makeOp := func(s *State) interface{} {
+        op := s.Get(1).String()
+        rhs := s.Get(2).Float()
         return func(lhs float64) float64 { 
             switch op {
                 case "+": return lhs + rhs
@@ -107,21 +107,17 @@ func (s *MySuite) TestCalculator(c *C) {
         }
     }
 
-    evalOps := func(info *Info) interface{} {
-        val := info.Get(1).Float()
-        for i := 1; i < info.Len(); i++ {
-            fn := info.Get(i + 1).Interface().(func(float64) float64)
+    evalOps := func(s *State) interface{} {
+        val := s.Get(1).Float()
+        for i := 1; i < s.Len(); i++ {
+            fn := s.Get(i + 1).Interface().(func(float64) float64)
             val = fn(val)
         }
         return val
     }
 
-    stripParens := func(info *Info) interface{} {
-        return info.Get(2).Float()
-    }
-
     expr1 := Deferred()
-    expr3 := OneOf(number, Sequence(lpar, expr1, rpar).Handle(stripParens)).Describe("expr3")
+    expr3 := OneOf(number, Sequence(lpar, expr1, rpar).FloatResult(2)).Describe("expr3")
 
     mulOps := ZeroOrMoreOf(Sequence(mul, expr3).Describe("mulop").Handle(makeOp)).Describe("mulops")
     expr2 := Sequence(expr3, mulOps).Flatten(1).Describe("expr2").Handle(evalOps)
