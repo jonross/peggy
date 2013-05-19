@@ -6,6 +6,7 @@ package peggy
 import (
     "log"
     "reflect"
+    "strconv"
     "strings"
     "unicode"
 )
@@ -74,10 +75,12 @@ func Literal(str string) *Parser {
     }).Handle(func(s *State) interface{} { return s.Text() })
 }
 
-// Return a Parser that tries a list of parsers in succession
-// and stops after the first that matches.
+// Return a Parser that tries a list of parsers in succession and stops after the
+// first that matches.  Arguments may be *Parser or strings; the latter will be
+// automatically converted with Literal()
 //
-func OneOf(parsers ...*Parser) *Parser {
+func OneOf(pv ...interface{}) *Parser {
+    parsers := asParsers(pv)
     return newParser("OneOf", false, parsers, func(state *State, input[]rune) (bool, int, interface{}) {
         for _, parser := range parsers {
             match, used, result := parser.invoke(state, input)
@@ -89,10 +92,12 @@ func OneOf(parsers ...*Parser) *Parser {
     })
 }
 
-// Return a Parser that keeps matching as long as any parser
-// in the supplied list of parsers matches.
+// Return a Parser that keeps matching as long as any parser in the supplied list
+// of parsers matches.  Arguments may be *Parser or strings; the latter will be
+// automatically converted with Literal()
 //
-func ZeroOrMoreOf(parsers ...*Parser) *Parser {
+func ZeroOrMoreOf(pv ...interface{}) *Parser {
+    parsers := asParsers(pv)
     return newParser("ZeroOrMoreOf", true, parsers, func(state *State, input[]rune) (bool, int, interface{}) {
         return someOf(false, state, parsers, input)
     })
@@ -100,7 +105,8 @@ func ZeroOrMoreOf(parsers ...*Parser) *Parser {
 
 // Like ZeroOrMoreOf but must match at least one, once.
 //
-func OneOrMoreOf(parsers ...*Parser) *Parser {
+func OneOrMoreOf(pv ...interface{}) *Parser {
+    parsers := asParsers(pv)
     return newParser("OneOrMoreOf", false, parsers, func(state *State, input[]rune) (bool, int, interface{}) {
         return someOf(true, state, parsers, input)
     })
@@ -128,12 +134,13 @@ func someOf(mustMatch bool, state *State, parsers []*Parser, input []rune) (bool
     }
 }
 
-// Return a parser that optionally matches what another parser matches.
+// Return a parser that optionally matches what another parser matches.  Argument may
+// be *Parser or strings; the latter will be automatically converted with Literal()
 //
-
-func Optional(parser *Parser) *Parser {
-    return newParser("OneOf", true, []*Parser{parser}, func(state *State, input[]rune) (bool, int, interface{}) {
-        match, used, result := parser.invoke(state, input)
+func Optional(p interface{}) *Parser {
+    parsers := asParsers([]interface{}{p})
+    return newParser("OneOf", true, parsers, func(state *State, input[]rune) (bool, int, interface{}) {
+        match, used, result := parsers[0].invoke(state, input)
         if match {
             return match, used, result
         }
@@ -144,7 +151,8 @@ func Optional(parser *Parser) *Parser {
 // Return a parser that matches if each of the supplied parsers
 // matches when tried in succession.
 //
-func Sequence(parsers ...*Parser) *Parser {
+func Sequence(pv ...interface{}) *Parser {
+    parsers := asParsers(pv)
     return newParser("Sequence", false, parsers, func(state *State, input []rune) (bool, int, interface{}) {
         totalUsed := 0
         results := make([]interface{}, 0)
@@ -163,10 +171,30 @@ func Sequence(parsers ...*Parser) *Parser {
 
 // Creates a Parser node around a parsing function.
 //
-func newParser(info string, allowEmpty bool, subParsers []*Parser, 
+func newParser(info string, allowEmpty bool, subParsers []*Parser,
                parse func(state *State, input []rune) (bool, int, interface{})) *Parser {
-    return &Parser{info, nil, allowEmpty, false, parse, subParsers, nil, false, 0, 0}
+   return &Parser{info, nil, allowEmpty, false, parse, subParsers, nil, false, 0, 0}
 }
+
+// Converts untyped array of *Parser / string into []*Parser
+//
+func asParsers(pv []interface{}) []*Parser {
+    parsers := []*Parser{}
+    for _, p := range pv {
+        parser, ok := p.(*Parser)
+        if ok {
+            parsers = append(parsers, parser)
+        } else {
+            str, ok := p.(string)
+            if ok {
+                parsers = append(parsers, Literal(str))
+            } else {
+                log.Fatalf("%#v is not a *Parser or string", p)
+            }
+        }
+    }
+    return parsers
+} 
 
 // Run one pass of a parser.  Skips whitespace if directed, and invokes
 // the handler with the string matched.
@@ -311,6 +339,15 @@ func (parser *Parser) Handle(handler func(s *State) interface{}) *Parser {
     return parser
 }
 
+// Use a Handler that converts the matched text using a predefined or user-defined converter.
+// Returns the Parser.
+//
+func (parser *Parser) Convert(c Converter) *Parser {
+    return parser.Handle(func (s *State) interface{} {
+        return c.convert(s)
+    })
+}
+
 // Change the information string of the parser, used during debugging
 //
 func (parser *Parser) Describe(text string) *Parser {
@@ -402,4 +439,35 @@ func (s *State) Get(index int) reflect.Value {
     // TODO proper error handling
     return val.Index(index - 1).Elem()
 }
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Objects implementing this interface may be passed to Parser.As for automatic conversion
+// of matched text or sub-parser results
+//
+type Converter interface {
+    convert(s *State) interface{}
+}
+
+type FloatConverter int
+type IntConverter int
+
+func (fc FloatConverter) convert(s *State) interface{} {
+    val, _ := strconv.ParseFloat(s.Text(), 64)
+    return val // TODO panic if bad
+}
+
+func (ic IntConverter) convert(s *State) interface{} {
+    val, _ := strconv.ParseInt(s.Text(), 10, 64)
+    return val // TODO panic if bad
+}
+
+// A converter that turns matched text into floating-point values
+//
+const Float = FloatConverter(1)
+
+// A converter that turns matched text into integer values
+//
+const Int = IntConverter(2)
+
 

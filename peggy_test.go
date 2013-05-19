@@ -4,7 +4,6 @@ import (
     . "launchpad.net/gocheck"
     "log"
     "os"
-    "strconv"
     "testing"
 )
 
@@ -69,21 +68,6 @@ func (s *MySuite) TestCalculator(c *C) {
     }
     log.SetOutput(console)
 
-    digits := OneOrMoreOf(AnyOf("0123456789")).Adjacent().Describe("digits")
-    point := Literal(".")
-
-    add := OneOf(Literal("+"), Literal("-"))
-    mul := OneOf(Literal("*"), Literal("/"))
-    lpar, rpar := Literal("("), Literal(")")
-
-    // matches 3, 3.5, .5; return float value
-    number := OneOf(digits, Sequence(Optional(digits), point, digits)).
-        Adjacent().Describe("number").
-        Handle(func(s *State) interface{} {
-            val, _ := strconv.ParseFloat(s.Text(), 64)
-            return val
-        })
-
     // Define parsers for the following EBNF:
     //
     // expr1 := expr2 [ ( "+" | "-" ) expr2 ]
@@ -91,6 +75,9 @@ func (s *MySuite) TestCalculator(c *C) {
     // expr3 := number | "(" expr1 ")"
     // number := { digit } | [ digit ] "." { digit }
     // digit := "0" ... "9"
+
+    digits := OneOrMoreOf(AnyOf("0123456789"))
+    number := OneOf(digits, Sequence(Optional(digits), ".", digits)).Adjacent().Convert(Float)
 
     makeOp := func(s *State) interface{} {
         op := s.Get(1).String()
@@ -116,12 +103,12 @@ func (s *MySuite) TestCalculator(c *C) {
     }
 
     expr1 := Deferred()
-    expr3 := OneOf(number, Sequence(lpar, expr1, rpar).Pick(2)).Describe("expr3")
+    expr3 := OneOf(number, Sequence("(", expr1, ")").Pick(2)).Describe("expr3")
 
-    mulOps := ZeroOrMoreOf(Sequence(mul, expr3).Describe("mulop").Handle(makeOp)).Describe("mulops")
+    mulOps := ZeroOrMoreOf(Sequence(OneOf("*", "/"), expr3).Handle(makeOp)).Describe("mulops")
     expr2 := Sequence(expr3, mulOps).Flatten(1).Describe("expr2").Handle(evalOps)
 
-    addOps := ZeroOrMoreOf(Sequence(add, expr2).Describe("addop").Handle(makeOp)).Describe("addops")
+    addOps := ZeroOrMoreOf(Sequence(OneOf("+", "-"), expr2).Handle(makeOp)).Describe("addops")
     _xpr1 := Sequence(expr2, addOps).Flatten(1).Describe("expr1").Handle(evalOps)
 
     expr1.Bind(_xpr1).Debug(4)
