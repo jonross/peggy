@@ -452,6 +452,7 @@ type Converter interface {
 type FloatConverter int
 type IntConverter int
 type StringConverter int
+type StringsConverter int
 
 func (fc FloatConverter) convert(s *State) interface{} {
     val, _ := strconv.ParseFloat(s.Text(), 64)
@@ -467,6 +468,14 @@ func (sc StringConverter) convert(s *State) interface{} {
     return s.Text()
 }
 
+func (sc StringsConverter) convert(s *State) interface{} {
+    result := make([]string, s.Len())
+    for i, _ := range result {
+        result[i] = s.Get(i+1).String()
+    }
+    return result
+}
+
 // A converter that turns matched text into floating-point values
 //
 const Float = FloatConverter(1)
@@ -478,4 +487,9 @@ const Int = IntConverter(2)
 // A converter that simply returns matched text
 //
 const String = StringConverter(3)
+
+// A converter that handles when the result array values are all strings
+// and turns them into a string slice.
+//
+const Strings = StringConverter(4)
 
