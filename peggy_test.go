@@ -25,10 +25,7 @@ func (s *MySuite) TestBasics(c *C) {
     letter := AnyOf("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_")
     number := AnyOf("0123456789")
 
-    identifier := Sequence(letter, ZeroOrMoreOf(OneOf(letter, number))).Adjacent().
-        Handle(func(s *State) interface{} { 
-            return s.Text()
-        })
+    identifier := Sequence(letter, ZeroOrMoreOf(OneOf(letter, number))).Adjacent().As(String)
 
     _, _, result := identifier.Parse("foo")
     c.Check("foo", Equals, result)
@@ -77,7 +74,7 @@ func (s *MySuite) TestCalculator(c *C) {
     // digit := "0" ... "9"
 
     digits := OneOrMoreOf(AnyOf("0123456789"))
-    number := OneOf(digits, Sequence(Optional(digits), ".", digits)).Adjacent().Convert(Float)
+    number := OneOf(digits, Sequence(Optional(digits), ".", digits)).Adjacent().As(Float)
 
     makeOp := func(s *State) interface{} {
         op := s.Get(1).String()

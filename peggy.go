@@ -342,7 +342,7 @@ func (parser *Parser) Handle(handler func(s *State) interface{}) *Parser {
 // Use a Handler that converts the matched text using a predefined or user-defined converter.
 // Returns the Parser.
 //
-func (parser *Parser) Convert(c Converter) *Parser {
+func (parser *Parser) As(c Converter) *Parser {
     return parser.Handle(func (s *State) interface{} {
         return c.convert(s)
     })
@@ -451,6 +451,7 @@ type Converter interface {
 
 type FloatConverter int
 type IntConverter int
+type StringConverter int
 
 func (fc FloatConverter) convert(s *State) interface{} {
     val, _ := strconv.ParseFloat(s.Text(), 64)
@@ -462,6 +463,10 @@ func (ic IntConverter) convert(s *State) interface{} {
     return val // TODO panic if bad
 }
 
+func (sc StringConverter) convert(s *State) interface{} {
+    return s.Text()
+}
+
 // A converter that turns matched text into floating-point values
 //
 const Float = FloatConverter(1)
@@ -470,4 +475,7 @@ const Float = FloatConverter(1)
 //
 const Int = IntConverter(2)
 
+// A converter that simply returns matched text
+//
+const String = StringConverter(3)
 
