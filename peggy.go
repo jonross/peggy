@@ -246,11 +246,11 @@ func (parser *Parser) invoke(state *State, input []rune) (bool, int, interface{}
         if parser.flatten {
             if reflect.ValueOf(result).Kind() == reflect.Slice {
                 if state.debug > 0 {
-                    log.Printf("%sflatten -> %#v\n", indent(), result)
+                    log.Printf("%sflatten(%d) -> %#v\n", indent(), parser.howFlat, result)
                 }
                 result = flatten(make([]interface{}, 0), result, parser.howFlat + 1)
                 if state.debug > 0 {
-                    log.Printf("%sflatten <- %#v\n", indent(), result)
+                    log.Printf("%sflatten(%d) <- %#v\n", indent(), parser.howFlat, result)
                 }
             } else {
                 if state.debug > 0 {
@@ -491,5 +491,5 @@ const String = StringConverter(3)
 // A converter that handles when the result array values are all strings
 // and turns them into a string slice.
 //
-const Strings = StringConverter(4)
+const Strings = StringsConverter(4)
 
